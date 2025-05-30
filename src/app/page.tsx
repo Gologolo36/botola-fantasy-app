@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent, useMemo } from 'react';
 import { db } from '@/lib/firebase'; 
 import { collection, getDocs, doc, getDoc, setDoc } from 'firebase/firestore'; 
 import { 
@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import { Award, Star } from 'lucide-react'; // For Captain/Vice-Captain icons
+import { Award, Star, ShieldCheck } from 'lucide-react'; // For Captain/Vice-Captain icons, ShieldCheck for points
 
 interface Player {
   id: string;
@@ -93,7 +93,6 @@ export default function BotolaRosterPage() {
     fetchPlayers();
   }, []); 
 
-  // Effect to load user's team from Firestore when user logs in
   useEffect(() => {
     if (!user || !isMounted) {
       setMyTeamLoading(false);
@@ -126,7 +125,6 @@ export default function BotolaRosterPage() {
     loadUserTeam();
   }, [user, isMounted]);
 
-  // Effect to derive myTeamPlayers when players or myTeamPlayerIds change
   useEffect(() => {
     if (players.length > 0 && myTeamPlayerIds.length > 0) {
       const selectedPlayers = players.filter(p => myTeamPlayerIds.includes(p.id));
@@ -135,6 +133,19 @@ export default function BotolaRosterPage() {
       setMyTeamPlayers([]); 
     }
   }, [players, myTeamPlayerIds]);
+
+  const totalTeamPoints = useMemo(() => {
+    if (!myTeamPlayers || myTeamPlayers.length === 0) {
+      return 0;
+    }
+    return myTeamPlayers.reduce((total, player) => {
+      let playerPoints = player.points || 0;
+      if (player.id === captainId) {
+        playerPoints *= 2; // Double captain's points
+      }
+      return total + playerPoints;
+    }, 0);
+  }, [myTeamPlayers, captainId]);
 
 
   const handleSignUp = async (e: FormEvent) => {
@@ -215,15 +226,15 @@ export default function BotolaRosterPage() {
     let newCaptainId: string | null = selectedPlayerId;
     let newViceCaptainId: string | null = viceCaptainId;
 
-    if (newViceCaptainId === selectedPlayerId) { // If chosen captain is current vice-captain
-      newViceCaptainId = null; // Unset vice-captain
+    if (newViceCaptainId === selectedPlayerId) { 
+      newViceCaptainId = null; 
     }
     
     try {
       const teamDocRef = doc(db, 'userTeams', user.uid);
       await setDoc(teamDocRef, { captainId: newCaptainId, viceCaptainId: newViceCaptainId }, { merge: true });
       setCaptainId(newCaptainId);
-      setViceCaptainId(newViceCaptainId); // Update local state for viceCaptainId as well
+      setViceCaptainId(newViceCaptainId); 
       setAuthMessage(`Captain set to ${players.find(p=>p.id === newCaptainId)?.name || 'selected player'}.`);
     } catch (error) {
       console.error("Error setting captain:", error);
@@ -243,15 +254,15 @@ export default function BotolaRosterPage() {
     let newViceCaptainId: string | null = selectedPlayerId;
     let newCaptainId: string | null = captainId;
 
-    if (newCaptainId === selectedPlayerId) { // If chosen vice-captain is current captain
-      newCaptainId = null; // Unset captain
+    if (newCaptainId === selectedPlayerId) { 
+      newCaptainId = null; 
     }
 
     try {
       const teamDocRef = doc(db, 'userTeams', user.uid);
       await setDoc(teamDocRef, { captainId: newCaptainId, viceCaptainId: newViceCaptainId }, { merge: true });
       setViceCaptainId(newViceCaptainId);
-      setCaptainId(newCaptainId); // Update local state for captainId as well
+      setCaptainId(newCaptainId); 
       setAuthMessage(`Vice-Captain set to ${players.find(p=>p.id === newViceCaptainId)?.name || 'selected player'}.`);
     } catch (error) {
       console.error("Error setting vice-captain:", error);
@@ -329,12 +340,15 @@ export default function BotolaRosterPage() {
         </CardContent>
       </Card>
 
-      {/* My Team Section */}
       {user && (
         <Card className="w-full max-w-2xl mb-10 shadow-xl border-none bg-card">
-          <CardHeader className="bg-secondary">
-            <CardTitle className="text-2xl text-center text-secondary-foreground py-4">
-              My Team ({myTeamPlayers.length}/{MAX_TEAM_SIZE})
+          <CardHeader className="bg-secondary text-secondary-foreground py-4">
+            <CardTitle className="text-2xl text-center flex flex-col sm:flex-row justify-around items-center">
+              <span>My Team ({myTeamPlayers.length}/{MAX_TEAM_SIZE})</span>
+              <span className="text-lg font-semibold flex items-center mt-2 sm:mt-0">
+                <ShieldCheck className="h-5 w-5 mr-2 text-primary" />
+                Total Points: {totalTeamPoints}
+              </span>
             </CardTitle>
           </CardHeader>
           <CardContent className="p-6">
@@ -366,7 +380,7 @@ export default function BotolaRosterPage() {
                           size="sm" 
                           variant={isCaptain ? "default" : "outline"} 
                           onClick={() => handleSetCaptain(player.id)}
-                          disabled={authLoading || (isCaptain && player.id === captainId) } // Disable if already captain and it's this player
+                          disabled={authLoading || (isCaptain && player.id === captainId) } 
                           aria-label={`Set ${player.name} as Captain`}
                           className="p-2"
                         >
@@ -376,7 +390,7 @@ export default function BotolaRosterPage() {
                           size="sm" 
                           variant={isViceCaptain ? "secondary" : "outline"} 
                           onClick={() => handleSetViceCaptain(player.id)}
-                          disabled={authLoading || (isViceCaptain && player.id === viceCaptainId)} // Disable if already vice-captain and it's this player
+                          disabled={authLoading || (isViceCaptain && player.id === viceCaptainId)} 
                           aria-label={`Set ${player.name} as Vice-Captain`}
                           className="p-2"
                         >
