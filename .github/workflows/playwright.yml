@@ -17,35 +17,7 @@ jobs:
         run: npm install
       - name: Install Playwright browsers
         run: npx playwright install
-      - name: Build Next.js app   # This might be line 14 or near it.
+      - name: Build Next.js app
         run: npm run build
       - name: Run Playwright tests
         run: npm run test:e2e
-    ```
-
-    * **Important:** Ensure that the `- name:` lines and `run:` lines have the correct indentation (two spaces for `name`, four spaces for `run`). The `uses:` lines also have two spaces.
-    * Make sure you **save this file** after making the change.
-
----
-
-**After you replace the code:**
-
-1.  **Commit and Push the Changes to GitHub:**
-    * Go back to your **Integrated Terminal** in Firebase Studio.
-    * Add the modified file:
-        ```bash
-        git add .github/workflows/playwright.yml
-        ```
-    * Commit the change:
-        ```bash
-        git commit -m "fix: Playwright - correct YAML indentation in workflow file"
-        ```
-    * Push the changes to GitHub:
-        ```bash
-        git push origin main
-        ```
-    * Provide your GitHub credentials if prompted.
-
-Once you push this fix, GitHub Actions will automatically start a new workflow run. Go to the "Actions" tab on GitHub.com and monitor the run.
-
-**Please let me know the final status of this new workflow run (green checkmark for passed, or red X for failed).** This fix should resolve the YAML syntax error.
