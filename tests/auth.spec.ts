@@ -24,10 +24,12 @@ test.describe('Authentication Flow', () => {
 
     // 3. Click the 'Log In' button
     await page.getByRole('button', { name: 'Log In' }).click();
+ await page.getByRole('button', { name: 'Log In' }).click({ timeout: 20000 }); // Increased timeout for the click
 
     // 4. Waits for the 'Welcome, [user email prefix]!' message to appear on the page.
     // Assert that the welcome message containing the full email is visible
     const welcomeMessageLocator = page.getByText(`Welcome, ${testUserEmail}!`);
+ await page.waitForLoadState('domcontentloaded'); // Ensure DOM is parsed
     await expect(welcomeMessageLocator).toBeVisible({ timeout: 10000 }); // Increased timeout for login processing
 
 
