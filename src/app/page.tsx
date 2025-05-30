@@ -2,8 +2,8 @@
 "use client";
 
 import { useState, useEffect, type FormEvent } from 'react';
-import { db } from '@/lib/firebase'; // Import the Firebase db instance
-import { collection, getDocs, doc, getDoc, setDoc } from 'firebase/firestore'; // Import collection, getDocs, doc, getDoc, setDoc
+import { db } from '@/lib/firebase'; 
+import { collection, getDocs, doc, getDoc, setDoc } from 'firebase/firestore'; 
 import { 
   getAuth, 
   createUserWithEmailAndPassword, 
@@ -17,7 +17,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator'; // Added Separator
+import { Separator } from '@/components/ui/separator';
+import { Award, Star } from 'lucide-react'; // For Captain/Vice-Captain icons
 
 interface Player {
   id: string;
@@ -49,6 +50,8 @@ export default function BotolaRosterPage() {
   const [myTeamPlayerIds, setMyTeamPlayerIds] = useState<string[]>([]);
   const [myTeamPlayers, setMyTeamPlayers] = useState<Player[]>([]);
   const [myTeamLoading, setMyTeamLoading] = useState(false);
+  const [captainId, setCaptainId] = useState<string | null>(null);
+  const [viceCaptainId, setViceCaptainId] = useState<string | null>(null);
 
   const auth = getAuth(db.app);
 
@@ -59,8 +62,10 @@ export default function BotolaRosterPage() {
       if (!currentUser) {
         setEmail('');
         setPassword('');
-        setMyTeamPlayerIds([]); // Clear team when user logs out
+        setMyTeamPlayerIds([]); 
         setMyTeamPlayers([]);
+        setCaptainId(null);
+        setViceCaptainId(null);
       }
       setAuthMessage(currentUser ? `Logged in as ${currentUser.email}` : 'Please sign in or sign up.');
     });
@@ -97,15 +102,19 @@ export default function BotolaRosterPage() {
 
     const loadUserTeam = async () => {
       setMyTeamLoading(true);
-      setAuthMessage(''); // Clear previous messages
+      setAuthMessage(''); 
       try {
         const teamDocRef = doc(db, 'userTeams', user.uid);
         const teamDocSnap = await getDoc(teamDocRef);
         if (teamDocSnap.exists()) {
           const teamData = teamDocSnap.data();
           setMyTeamPlayerIds(teamData.playerIds || []);
+          setCaptainId(teamData.captainId || null);
+          setViceCaptainId(teamData.viceCaptainId || null);
         } else {
-          setMyTeamPlayerIds([]); // No team saved yet
+          setMyTeamPlayerIds([]); 
+          setCaptainId(null);
+          setViceCaptainId(null);
         }
       } catch (error) {
         console.error("Error loading user team:", error);
@@ -115,16 +124,15 @@ export default function BotolaRosterPage() {
       }
     };
     loadUserTeam();
-  }, [user, isMounted]); // Removed db from dependencies as it's stable
+  }, [user, isMounted]);
 
   // Effect to derive myTeamPlayers when players or myTeamPlayerIds change
   useEffect(() => {
     if (players.length > 0 && myTeamPlayerIds.length > 0) {
       const selectedPlayers = players.filter(p => myTeamPlayerIds.includes(p.id));
-      // Ensure order is preserved or sort if necessary, for now, it depends on `players` order
       setMyTeamPlayers(selectedPlayers);
     } else {
-      setMyTeamPlayers([]); // Clear if no players or no IDs
+      setMyTeamPlayers([]); 
     }
   }, [players, myTeamPlayerIds]);
 
@@ -182,16 +190,72 @@ export default function BotolaRosterPage() {
       return;
     }
 
-    setAuthLoading(true); // Use authLoading for general async operations on team
+    setAuthLoading(true); 
     const newTeamPlayerIds = [...myTeamPlayerIds, playerToAdd.id];
     try {
       const teamDocRef = doc(db, 'userTeams', user.uid);
       await setDoc(teamDocRef, { playerIds: newTeamPlayerIds }, { merge: true });
-      setMyTeamPlayerIds(newTeamPlayerIds); // This will trigger effect to update myTeamPlayers
+      setMyTeamPlayerIds(newTeamPlayerIds); 
       setAuthMessage(`${playerToAdd.name} added to your team!`);
     } catch (error) {
       console.error("Error adding player to team:", error);
       setAuthMessage("Failed to add player. Please try again.");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSetCaptain = async (selectedPlayerId: string) => {
+    if (!user) {
+      setAuthMessage("You must be logged in to set a captain.");
+      return;
+    }
+    setAuthLoading(true);
+    setAuthMessage('');
+    let newCaptainId: string | null = selectedPlayerId;
+    let newViceCaptainId: string | null = viceCaptainId;
+
+    if (newViceCaptainId === selectedPlayerId) { // If chosen captain is current vice-captain
+      newViceCaptainId = null; // Unset vice-captain
+    }
+    
+    try {
+      const teamDocRef = doc(db, 'userTeams', user.uid);
+      await setDoc(teamDocRef, { captainId: newCaptainId, viceCaptainId: newViceCaptainId }, { merge: true });
+      setCaptainId(newCaptainId);
+      setViceCaptainId(newViceCaptainId); // Update local state for viceCaptainId as well
+      setAuthMessage(`Captain set to ${players.find(p=>p.id === newCaptainId)?.name || 'selected player'}.`);
+    } catch (error) {
+      console.error("Error setting captain:", error);
+      setAuthMessage("Failed to set captain. Please try again.");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSetViceCaptain = async (selectedPlayerId: string) => {
+    if (!user) {
+      setAuthMessage("You must be logged in to set a vice-captain.");
+      return;
+    }
+    setAuthLoading(true);
+    setAuthMessage('');
+    let newViceCaptainId: string | null = selectedPlayerId;
+    let newCaptainId: string | null = captainId;
+
+    if (newCaptainId === selectedPlayerId) { // If chosen vice-captain is current captain
+      newCaptainId = null; // Unset captain
+    }
+
+    try {
+      const teamDocRef = doc(db, 'userTeams', user.uid);
+      await setDoc(teamDocRef, { captainId: newCaptainId, viceCaptainId: newViceCaptainId }, { merge: true });
+      setViceCaptainId(newViceCaptainId);
+      setCaptainId(newCaptainId); // Update local state for captainId as well
+      setAuthMessage(`Vice-Captain set to ${players.find(p=>p.id === newViceCaptainId)?.name || 'selected player'}.`);
+    } catch (error) {
+      console.error("Error setting vice-captain:", error);
+      setAuthMessage("Failed to set vice-captain. Please try again.");
     } finally {
       setAuthLoading(false);
     }
@@ -232,7 +296,7 @@ export default function BotolaRosterPage() {
               </Button>
             </div>
           ) : (
-            <form className="space-y-6"> {/* Removed onSubmit to handle buttons separately */}
+            <form className="space-y-6">
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input 
@@ -284,15 +348,44 @@ export default function BotolaRosterPage() {
               <p className="text-lg text-muted-foreground text-center">Your team is empty. Add players from the roster below.</p>
             ) : (
               <ul className="space-y-3">
-                {myTeamPlayers.map(player => (
-                  <li key={player.id} className="flex justify-between items-center p-3 bg-background rounded-md shadow">
-                    <div>
-                      <p className="font-semibold text-foreground">{player.name}</p>
-                      <p className="text-sm text-muted-foreground">{player.team}</p>
-                    </div>
-                    {/* Placeholder for "Remove" button if needed later */}
-                  </li>
-                ))}
+                {myTeamPlayers.map(player => {
+                  const isCaptain = player.id === captainId;
+                  const isViceCaptain = player.id === viceCaptainId;
+                  return (
+                    <li key={player.id} className="flex justify-between items-center p-3 bg-background rounded-md shadow">
+                      <div className="flex-grow">
+                        <p className="font-semibold text-foreground">
+                          {player.name}
+                          {isCaptain && <span className="ml-2 text-xs font-bold text-primary">(C)</span>}
+                          {isViceCaptain && <span className="ml-2 text-xs font-bold text-secondary-foreground">(V)</span>}
+                        </p>
+                        <p className="text-sm text-muted-foreground">{player.team}</p>
+                      </div>
+                      <div className="flex space-x-2 items-center">
+                        <Button 
+                          size="sm" 
+                          variant={isCaptain ? "default" : "outline"} 
+                          onClick={() => handleSetCaptain(player.id)}
+                          disabled={authLoading || (isCaptain && player.id === captainId) } // Disable if already captain and it's this player
+                          aria-label={`Set ${player.name} as Captain`}
+                          className="p-2"
+                        >
+                          <Award className="h-4 w-4" />
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          variant={isViceCaptain ? "secondary" : "outline"} 
+                          onClick={() => handleSetViceCaptain(player.id)}
+                          disabled={authLoading || (isViceCaptain && player.id === viceCaptainId)} // Disable if already vice-captain and it's this player
+                          aria-label={`Set ${player.name} as Vice-Captain`}
+                          className="p-2"
+                        >
+                          <Star className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </CardContent>
@@ -396,3 +489,4 @@ export default function BotolaRosterPage() {
     </div>
   );
 }
+
