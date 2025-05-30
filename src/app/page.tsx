@@ -1,6 +1,9 @@
+
 "use client";
 
 import { useState, useEffect } from 'react';
+import { db } from '@/lib/firebase'; // Import the Firebase db instance
+import { collection, getDocs } from 'firebase/firestore'; // Import collection and getDocs
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -11,33 +14,36 @@ interface Player {
   position?: string;
   jerseyNumber?: number;
   imageUrl?: string; // Optional: for player images
+  dataAiHint?: string; // Optional: for AI image search hint
 }
-
-// Mock data for Botola Pro players
-const mockPlayers: Player[] = [
-  { id: '1', name: 'Yahya Jabrane', team: 'Wydad AC', position: 'Midfielder', jerseyNumber: 5, imageUrl: 'https://placehold.co/100x100.png', dataAiHint: 'soccer player' },
-  { id: '2', name: 'Anas Zniti', team: 'Raja CA', position: 'Goalkeeper', jerseyNumber: 1, imageUrl: 'https://placehold.co/100x100.png', dataAiHint: 'athlete portrait' },
-  { id: '3', name: 'Yousri Bouzok', team: 'Raja CA', position: 'Winger', jerseyNumber: 7, imageUrl: 'https://placehold.co/100x100.png', dataAiHint: 'soccer action' },
-  { id: '4', name: 'Rabie Hrimat', team: 'FAR Rabat', position: 'Midfielder', jerseyNumber: 8, imageUrl: 'https://placehold.co/100x100.png', dataAiHint: 'sports game' },
-  { id: '5', name: 'Youssef El Motie', team: 'Wydad AC', position: 'Goalkeeper', jerseyNumber: 12, imageUrl: 'https://placehold.co/100x100.png', dataAiHint: 'goal keeper' },
-  { id: '6', name: 'Diney Borges', team: 'FAR Rabat', position: 'Defender', jerseyNumber: 4, imageUrl: 'https://placehold.co/100x100.png', dataAiHint: 'soccer match' },
-  { id: '7', name: 'Ayoub El Amloud', team: 'Wydad AC', position: 'Defender', jerseyNumber: 22, imageUrl: 'https://placehold.co/100x100.png', dataAiHint: 'player running' },
-  { id: '8', name: 'Mohamed Zrida', team: 'Raja CA', position: 'Midfielder', jerseyNumber: 18, imageUrl: 'https://placehold.co/100x100.png', dataAiHint: 'midfielder action' },
-];
 
 export default function BotolaRosterPage() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setPlayers(mockPlayers);
-      setLoading(false);
-    }, 1500); // Simulate API call
+    const fetchPlayers = async () => {
+      try {
+        const playersCollectionRef = collection(db, 'players'); // Get a reference to the collection
+        const playersSnapshot = await getDocs(playersCollectionRef); // Get the documents in the collection
+        const playersData = playersSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data() as Omit<Player, 'id'> // Cast data to Player interface, excluding the id
+        }));
+        setPlayers(playersData);
+      } catch (error) {
+        console.error("Error fetching players: ", error);
+        // Optionally set an error state here if you want to display an error message to the user
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    return () => clearTimeout(timer);
-  }, []);
+    fetchPlayers();
+  }, []); // Empty dependency array means this effect runs once on mount
 
+  // From here downwards is the JSX (HTML-like structure) that your component renders.
+  // There should be no JavaScript code or stray characters directly before this 'return'.
   return (
     <div className="container mx-auto px-4 py-8 min-h-screen flex flex-col items-center bg-background text-foreground">
       <header className="mb-10 text-center">
@@ -92,14 +98,20 @@ export default function BotolaRosterPage() {
                       className="p-6 hover:bg-accent/10 transition-colors duration-200 flex items-center space-x-6"
                       aria-label={`Player: ${player.name}, Team: ${player.team}`}
                     >
-                      {player.imageUrl && (
-                        // Using a simple img tag for placeholder, next/image would be for optimized images
+                      {player.imageUrl ? (
                         <img 
                           src={player.imageUrl} 
                           alt={player.name} 
                           className="h-20 w-20 rounded-full object-cover border-2 border-primary/50 shadow-md"
                           data-ai-hint={player.dataAiHint || "sports person"}
                         />
+                      ) : (
+                        <div 
+                          className="h-20 w-20 rounded-full bg-muted flex items-center justify-center text-muted-foreground text-xs border-2 border-primary/50 shadow-md"
+                          data-ai-hint={player.dataAiHint || "sports person"}
+                        >
+                          No Image
+                        </div>
                       )}
                       <div className="flex-grow">
                         <p className="text-xl font-semibold text-foreground">{player.name}</p>
