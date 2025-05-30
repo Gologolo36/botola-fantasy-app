@@ -10,13 +10,25 @@ jobs:
     timeout-minutes: 60
     runs-on: ubuntu-latest
     steps:
+      name: Playwright Tests
+on:
+  push:
+    branches:
+      - main
+jobs:
+  test:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - name: Install dependencies
-        run: npm ci
-      - name: Install Playwright Browsers
-        run: npx playwright install --with-deps
+        run: npm install
+      - name: Install Playwright browsers
+        run: npx playwright install
+      - name: Build Next.js app   # <--- ADD THESE TWO LINES
+        run: npm run build       # <--- ADD THESE TWO LINES
       - name: Run Playwright tests
         run: npm run test:e2e
