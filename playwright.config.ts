@@ -54,11 +54,12 @@ export default defineConfig<TestOptions>({
 
   /* Run your local dev server before starting the tests */
   webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:9002',
+    // Command to build the app before serving (if not already done in CI)
+    // It's usually better to run 'npm run build' as a separate step in CI,
+    // and then run 'npm run start' here. But for simplicity, we'll keep it here for now.
+    command: 'npm run start', // Changed from 'npm run dev' to 'npm run start'
+    url: 'http://127.0.0.1:3000',
+    timeout: 120 * 1000, // Increased timeout for server startup
     reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000, // 2 minutes to start
-    stdout: 'pipe',
-    stderr: 'pipe',
   },
 });
