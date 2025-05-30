@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import { Award, Star, ShieldCheck, Banknote, Scale, Trash2 } from 'lucide-react'; // For Captain/Vice-Captain icons, ShieldCheck for points, Banknote for budget, Scale for team value, Trash2 for sell
+import { Award, Star, ShieldCheck, Banknote, Scale, Trash2, TrendingUp, CalendarDays } from 'lucide-react'; 
 
 interface Player {
   id: string;
@@ -34,6 +34,10 @@ interface Player {
 
 const MAX_TEAM_SIZE = 15;
 const INITIAL_BUDGET = 100.0;
+const CURRENT_GAMEWEEK = 1;
+const INITIAL_FREE_TRANSFERS_GW1 = 1; 
+const TRANSFER_POINT_COST = 4;
+
 
 export default function BotolaRosterPage() {
   const [players, setPlayers] = useState<Player[]>([]);
@@ -54,6 +58,12 @@ export default function BotolaRosterPage() {
   const [captainId, setCaptainId] = useState<string | null>(null);
   const [viceCaptainId, setViceCaptainId] = useState<string | null>(null);
   const [budget, setBudget] = useState<number>(INITIAL_BUDGET);
+  
+  // Gameweek and Transfer state
+  const [freeTransfers, setFreeTransfers] = useState<number>(INITIAL_FREE_TRANSFERS_GW1);
+  const [transfersMadeThisGw, setTransfersMadeThisGw] = useState<number>(0);
+  const [pointsDeductions, setPointsDeductions] = useState<number>(0);
+
 
   const auth = getAuth(db.app);
 
@@ -68,55 +78,88 @@ export default function BotolaRosterPage() {
         setMyTeamPlayers([]);
         setCaptainId(null);
         setViceCaptainId(null);
-        setBudget(INITIAL_BUDGET); // Reset budget on logout
+        setBudget(INITIAL_BUDGET);
+        setFreeTransfers(INITIAL_FREE_TRANSFERS_GW1);
+        setTransfersMadeThisGw(0);
+        setPointsDeductions(0);
         setAuthMessage('Please sign in or sign up.');
       } else {
         setAuthMessage(`Logged in as ${currentUser.email}`);
       }
-      // setAuthLoading(false); // Removed as it might prematurely hide loading states during auth changes
     });
     return () => unsubscribe();
   }, [auth]);
 
   const loadUserTeam = useMemo(() => async () => {
-    if (!user || !isMounted) return; // Guard against running if user or mount status is not ready
+    if (!user || !isMounted) return;
 
     setMyTeamLoading(true);
     setAuthMessage(''); 
     const teamDocRef = doc(db, 'userTeams', user.uid);
     try {
       const teamDocSnap = await getDoc(teamDocRef);
+      
+      let teamDataToSave: any = { // Use 'any' temporarily for easier object building
+        playerIds: [],
+        captainId: null,
+        viceCaptainId: null,
+        budget: INITIAL_BUDGET,
+        currentGameweek: CURRENT_GAMEWEEK,
+        freeTransfers: INITIAL_FREE_TRANSFERS_GW1,
+        transfersMadeThisGw: 0,
+        pointsDeductions: 0,
+      };
+      let needsFirestoreUpdate = false;
+
       if (teamDocSnap.exists()) {
-        const teamData = teamDocSnap.data();
-        setMyTeamPlayerIds(teamData.playerIds || []);
-        setCaptainId(teamData.captainId || null);
-        setViceCaptainId(teamData.viceCaptainId || null);
-        if (teamData.budget === undefined) {
-          setBudget(INITIAL_BUDGET);
-          await setDoc(teamDocRef, { budget: INITIAL_BUDGET }, { merge: true });
-        } else {
-          setBudget(teamData.budget);
+        const existingData = teamDocSnap.data();
+        teamDataToSave = { ...teamDataToSave, ...existingData }; // Merge, existing overrides defaults
+
+        // Gameweek rollover/initialization logic
+        if (existingData.currentGameweek !== CURRENT_GAMEWEEK || existingData.freeTransfers === undefined) {
+          teamDataToSave.currentGameweek = CURRENT_GAMEWEEK;
+          teamDataToSave.freeTransfers = INITIAL_FREE_TRANSFERS_GW1;
+          teamDataToSave.transfersMadeThisGw = 0;
+          teamDataToSave.pointsDeductions = 0; // Reset deductions for a new gameweek
+          needsFirestoreUpdate = true;
+        }
+        if (existingData.budget === undefined) {
+            teamDataToSave.budget = INITIAL_BUDGET;
+            needsFirestoreUpdate = true;
         }
       } else {
-        // New user or no team doc yet, initialize it
-        setMyTeamPlayerIds([]);
-        setCaptainId(null);
-        setViceCaptainId(null);
-        setBudget(INITIAL_BUDGET);
-        await setDoc(teamDocRef, { 
-          playerIds: [], 
-          captainId: null, 
-          viceCaptainId: null, 
-          budget: INITIAL_BUDGET 
-        });
+        // New user, document doesn't exist, will be created with all defaults
+        needsFirestoreUpdate = true;
       }
+      
+      setMyTeamPlayerIds(teamDataToSave.playerIds || []);
+      setCaptainId(teamDataToSave.captainId || null);
+      setViceCaptainId(teamDataToSave.viceCaptainId || null);
+      setBudget(teamDataToSave.budget);
+      setFreeTransfers(teamDataToSave.freeTransfers);
+      setTransfersMadeThisGw(teamDataToSave.transfersMadeThisGw);
+      setPointsDeductions(teamDataToSave.pointsDeductions);
+
+      if (needsFirestoreUpdate) {
+        await setDoc(teamDocRef, {
+          playerIds: teamDataToSave.playerIds,
+          captainId: teamDataToSave.captainId,
+          viceCaptainId: teamDataToSave.viceCaptainId,
+          budget: teamDataToSave.budget,
+          currentGameweek: teamDataToSave.currentGameweek,
+          freeTransfers: teamDataToSave.freeTransfers,
+          transfersMadeThisGw: teamDataToSave.transfersMadeThisGw,
+          pointsDeductions: teamDataToSave.pointsDeductions,
+        }, { merge: true }); // Use merge:true to be safe, creates if not exists
+      }
+
     } catch (error) {
       console.error("Error loading/initializing user team:", error);
       setAuthMessage("Error loading/initializing your team.");
     } finally {
       setMyTeamLoading(false);
     }
-  }, [user, isMounted]); // Dependencies for useMemo wrapper
+  }, [user, isMounted]); 
 
   useEffect(() => {
     const fetchPlayers = async () => {
@@ -143,12 +186,14 @@ export default function BotolaRosterPage() {
     if (user && isMounted) {
       loadUserTeam();
     } else if (!user && isMounted) {
-      // Reset team state if user logs out and component is still mounted
       setMyTeamPlayerIds([]);
       setMyTeamPlayers([]);
       setCaptainId(null);
       setViceCaptainId(null);
       setBudget(INITIAL_BUDGET);
+      setFreeTransfers(INITIAL_FREE_TRANSFERS_GW1);
+      setTransfersMadeThisGw(0);
+      setPointsDeductions(0);
       setMyTeamLoading(false);
     }
   }, [user, isMounted, loadUserTeam]);
@@ -169,16 +214,17 @@ export default function BotolaRosterPage() {
 
   const totalTeamPoints = useMemo(() => {
     if (!myTeamPlayers || myTeamPlayers.length === 0) {
-      return 0;
+      return 0 - pointsDeductions;
     }
-    return myTeamPlayers.reduce((total, player) => {
+    const rawPoints = myTeamPlayers.reduce((total, player) => {
       let playerPoints = player.points || 0;
       if (player.id === captainId) {
-        playerPoints *= 2; // Double captain's points
+        playerPoints *= 2; 
       }
       return total + playerPoints;
     }, 0);
-  }, [myTeamPlayers, captainId]);
+    return rawPoints - pointsDeductions;
+  }, [myTeamPlayers, captainId, pointsDeductions]);
 
 
   const handleSignUp = async (e: FormEvent) => {
@@ -187,7 +233,6 @@ export default function BotolaRosterPage() {
     setAuthMessage('');
     try {
       await createUserWithEmailAndPassword(auth, email, password);
-      // loadUserTeam will be called via useEffect hook due to user state change
     } catch (error: any) {
       setAuthMessage(error.message);
     } finally {
@@ -201,7 +246,6 @@ export default function BotolaRosterPage() {
     setAuthMessage('');
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      // loadUserTeam will be called via useEffect hook due to user state change
     } catch (error: any) {
       setAuthMessage(error.message);
     } finally {
@@ -214,7 +258,6 @@ export default function BotolaRosterPage() {
     setAuthMessage('');
     try {
       await signOut(auth);
-      // State reset handled by onAuthStateChanged
     } catch (error: any)
     {
       setAuthMessage(error.message);
@@ -245,24 +288,37 @@ export default function BotolaRosterPage() {
     setAuthLoading(true); 
     const newTeamPlayerIds = [...myTeamPlayerIds, playerToAdd.id];
     const newBudget = budget - playerPrice;
+
+    let transferMsg = "";
+    let currentPointsDeductions = pointsDeductions;
+    let currentFreeTransfers = freeTransfers;
+    let currentTransfersMade = transfersMadeThisGw + 1;
+
+    if (currentFreeTransfers > 0) {
+      currentFreeTransfers -= 1;
+      transferMsg = "Used free transfer.";
+    } else {
+      currentPointsDeductions += TRANSFER_POINT_COST;
+      transferMsg = `-${TRANSFER_POINT_COST} points deduction for transfer.`;
+    }
+    
     try {
       const teamDocRef = doc(db, 'userTeams', user.uid);
-      // Ensure document exists with all necessary fields, especially if it's the first add
-      const teamDocSnap = await getDoc(teamDocRef);
-      if (!teamDocSnap.exists()) {
-        // This case should ideally be covered by loadUserTeam, but as a fallback:
-        await setDoc(teamDocRef, { 
-            playerIds: newTeamPlayerIds, 
-            budget: newBudget, 
-            captainId: null, 
-            viceCaptainId: null 
-        });
-      } else {
-        await setDoc(teamDocRef, { playerIds: newTeamPlayerIds, budget: newBudget }, { merge: true });
-      }
+      await setDoc(teamDocRef, { 
+        playerIds: newTeamPlayerIds, 
+        budget: newBudget,
+        freeTransfers: currentFreeTransfers,
+        transfersMadeThisGw: currentTransfersMade,
+        pointsDeductions: currentPointsDeductions,
+        currentGameweek: CURRENT_GAMEWEEK // Keep GW consistent
+      }, { merge: true });
+      
       setMyTeamPlayerIds(newTeamPlayerIds); 
       setBudget(newBudget);
-      setAuthMessage(`${playerToAdd.name} added! Budget: £${newBudget.toFixed(1)}m.`);
+      setFreeTransfers(currentFreeTransfers);
+      setTransfersMadeThisGw(currentTransfersMade);
+      setPointsDeductions(currentPointsDeductions);
+      setAuthMessage(`${playerToAdd.name} added! Budget: £${newBudget.toFixed(1)}m. ${transferMsg}`);
     } catch (error) {
       console.error("Error adding player to team:", error);
       setAuthMessage("Failed to add player. Please try again.");
@@ -283,13 +339,22 @@ export default function BotolaRosterPage() {
     let newCaptainId = captainId;
     let newViceCaptainId = viceCaptainId;
 
-    if (captainId === playerToSell.id) {
-      newCaptainId = null;
-    }
-    if (viceCaptainId === playerToSell.id) {
-      newViceCaptainId = null;
-    }
+    if (captainId === playerToSell.id) newCaptainId = null;
+    if (viceCaptainId === playerToSell.id) newViceCaptainId = null;
     
+    let transferMsg = "";
+    let currentPointsDeductions = pointsDeductions;
+    let currentFreeTransfers = freeTransfers;
+    let currentTransfersMade = transfersMadeThisGw + 1;
+
+    if (currentFreeTransfers > 0) {
+      currentFreeTransfers -= 1;
+      transferMsg = "Used free transfer.";
+    } else {
+      currentPointsDeductions += TRANSFER_POINT_COST;
+      transferMsg = `-${TRANSFER_POINT_COST} points deduction for transfer.`;
+    }
+
     try {
       const teamDocRef = doc(db, 'userTeams', user.uid);
       await setDoc(teamDocRef, { 
@@ -297,13 +362,20 @@ export default function BotolaRosterPage() {
         budget: newBudget,
         captainId: newCaptainId,
         viceCaptainId: newViceCaptainId,
+        freeTransfers: currentFreeTransfers,
+        transfersMadeThisGw: currentTransfersMade,
+        pointsDeductions: currentPointsDeductions,
+        currentGameweek: CURRENT_GAMEWEEK
       }, { merge: true });
 
       setMyTeamPlayerIds(newTeamPlayerIds);
       setBudget(newBudget);
       setCaptainId(newCaptainId);
       setViceCaptainId(newViceCaptainId);
-      setAuthMessage(`${playerToSell.name} sold. Budget: £${newBudget.toFixed(1)}m.`);
+      setFreeTransfers(currentFreeTransfers);
+      setTransfersMadeThisGw(currentTransfersMade);
+      setPointsDeductions(currentPointsDeductions);
+      setAuthMessage(`${playerToSell.name} sold. Budget: £${newBudget.toFixed(1)}m. ${transferMsg}`);
     } catch (error) {
       console.error("Error selling player:", error);
       setAuthMessage("Failed to sell player. Please try again.");
@@ -323,9 +395,7 @@ export default function BotolaRosterPage() {
     let newCaptainId: string | null = selectedPlayerId;
     let newViceCaptainId: string | null = viceCaptainId;
 
-    if (newViceCaptainId === selectedPlayerId) { 
-      newViceCaptainId = null; 
-    }
+    if (newViceCaptainId === selectedPlayerId) newViceCaptainId = null; 
     
     try {
       const teamDocRef = doc(db, 'userTeams', user.uid);
@@ -351,9 +421,7 @@ export default function BotolaRosterPage() {
     let newViceCaptainId: string | null = selectedPlayerId;
     let newCaptainId: string | null = captainId;
 
-    if (newCaptainId === selectedPlayerId) { 
-      newCaptainId = null; 
-    }
+    if (newCaptainId === selectedPlayerId) newCaptainId = null; 
 
     try {
       const teamDocRef = doc(db, 'userTeams', user.uid);
@@ -382,23 +450,22 @@ export default function BotolaRosterPage() {
     <div className="container mx-auto px-4 py-8 min-h-screen flex flex-col items-center bg-background text-foreground">
       <header className="mb-10 text-center">
         <h1 className="text-4xl font-extrabold tracking-tight text-primary sm:text-5xl md:text-6xl">
-          Botola Pro Players
+          Botola Pro Fantasy
         </h1>
         <p className="mt-3 text-base text-muted-foreground sm:mt-5 sm:text-lg sm:max-w-xl sm:mx-auto md:mt-5 md:text-xl">
-          Discover the stars of Moroccan football.
+          Build your dream team and compete!
         </p>
       </header>
 
       <Card className="w-full max-w-md mb-10 shadow-xl border-none bg-card">
         <CardHeader>
           <CardTitle className="text-2xl text-center text-primary-foreground bg-primary py-4 rounded-t-lg -mx-6 -mt-6 px-6">
-            {user ? 'Welcome!' : 'Account'}
+            {user ? `Welcome, ${user.email?.split('@')[0]}!` : 'Account'}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-6 p-6">
           {user ? (
             <div className="space-y-4 text-center">
-              <p className="text-lg text-foreground">Welcome, {user.email}!</p>
               <Button onClick={handleSignOut} disabled={authLoading} className="w-full">
                 {authLoading ? 'Signing Out...' : 'Sign Out'}
               </Button>
@@ -444,13 +511,19 @@ export default function BotolaRosterPage() {
               <span className="whitespace-nowrap">My Team ({myTeamPlayers.length}/{MAX_TEAM_SIZE})</span>
               <div className="flex flex-wrap justify-center items-center gap-x-3 gap-y-1 text-sm sm:text-base font-semibold mt-2 sm:mt-0">
                 <span className="flex items-center whitespace-nowrap">
-                  <Banknote className="h-4 w-4 sm:h-5 sm:w-5 mr-1 text-green-400" /> Budget: £{budget.toFixed(1)}m
+                  <CalendarDays className="h-4 w-4 sm:h-5 sm:w-5 mr-1 text-purple-400" /> GW: {CURRENT_GAMEWEEK}
                 </span>
                 <span className="flex items-center whitespace-nowrap">
-                  <Scale className="h-4 w-4 sm:h-5 sm:w-5 mr-1 text-blue-400" /> Value: £{teamValue.toFixed(1)}m
+                  <Banknote className="h-4 w-4 sm:h-5 sm:w-5 mr-1 text-green-400" /> £{budget.toFixed(1)}m
                 </span>
                 <span className="flex items-center whitespace-nowrap">
-                  <ShieldCheck className="h-4 w-4 sm:h-5 sm:w-5 mr-1 text-primary" /> Points: {totalTeamPoints}
+                  <Scale className="h-4 w-4 sm:h-5 sm:w-5 mr-1 text-blue-400" /> Val: £{teamValue.toFixed(1)}m
+                </span>
+                 <span className="flex items-center whitespace-nowrap">
+                  <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 mr-1 text-orange-400" /> FT: {freeTransfers}
+                </span>
+                <span className="flex items-center whitespace-nowrap">
+                  <ShieldCheck className="h-4 w-4 sm:h-5 sm:w-5 mr-1 text-primary" /> Pts: {totalTeamPoints}
                 </span>
               </div>
             </CardTitle>
@@ -564,7 +637,7 @@ export default function BotolaRosterPage() {
                     const canAfford = playerPrice <= budget;
                     
                     let buttonText = "Add to Team";
-                    if (isPlayerInTeam) buttonText = "Added";
+                    if (isPlayerInTeam) buttonText = "In Team";
                     else if (isTeamFull) buttonText = "Team Full";
                     else if (!canAfford) buttonText = "Too Expensive";
 
@@ -620,7 +693,7 @@ export default function BotolaRosterPage() {
         )}
       </div>
       <footer className="mt-16 text-center text-sm text-muted-foreground">
-        <p>&copy; {new Date().getFullYear()} Botola Roster. All rights reserved.</p>
+        <p>&copy; {new Date().getFullYear()} Botola Fantasy. All rights reserved.</p>
       </footer>
     </div>
   );
