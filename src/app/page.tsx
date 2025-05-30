@@ -1,11 +1,22 @@
 
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { db } from '@/lib/firebase'; // Import the Firebase db instance
 import { collection, getDocs } from 'firebase/firestore'; // Import collection and getDocs
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { 
+  getAuth, 
+  createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword, 
+  signOut, 
+  onAuthStateChanged,
+  type User 
+} from 'firebase/auth';
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 interface Player {
   id: string;
@@ -15,16 +26,43 @@ interface Player {
   jerseyNumber?: number;
   imageUrl?: string; 
   dataAiHint?: string;
-  price?: number; // Added price
-  points?: number; // Added points
+  price?: number; 
+  points?: number; 
 }
 
 export default function BotolaRosterPage() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Auth state
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [user, setUser] = useState<User | null>(null);
+  const [authMessage, setAuthMessage] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
+
+  const auth = getAuth(db.app);
+
+  useEffect(() => {
+    setIsMounted(true);
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      if (!currentUser) {
+        // Clear form fields when user logs out or is not logged in initially
+        setEmail('');
+        setPassword('');
+      }
+      setAuthMessage(currentUser ? `Logged in as ${currentUser.email}` : 'Please sign in or sign up.');
+    });
+
+    // Cleanup subscription on unmount
+    return () => unsubscribe();
+  }, [auth]);
+
   useEffect(() => {
     const fetchPlayers = async () => {
+      setLoading(true);
       try {
         const playersCollectionRef = collection(db, 'players'); 
         const playersSnapshot = await getDocs(playersCollectionRef); 
@@ -35,6 +73,7 @@ export default function BotolaRosterPage() {
         setPlayers(playersData);
       } catch (error) {
         console.error("Error fetching players: ", error);
+        setAuthMessage("Error fetching players."); // Use authMessage for general messages too
       } finally {
         setLoading(false);
       }
@@ -42,6 +81,60 @@ export default function BotolaRosterPage() {
 
     fetchPlayers();
   }, []); 
+
+  const handleSignUp = async (e: FormEvent) => {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthMessage('');
+    try {
+      await createUserWithEmailAndPassword(auth, email, password);
+      // onAuthStateChanged will handle setting the user and success message
+      // setAuthMessage('Signed up successfully! You are now logged in.'); // No longer needed here
+    } catch (error: any) {
+      setAuthMessage(error.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogin = async (e: FormEvent) => {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthMessage('');
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      // onAuthStateChanged will handle setting the user and success message
+      // setAuthMessage(`Logged in as ${userCredential.user.email}`); // No longer needed here
+    } catch (error: any) {
+      setAuthMessage(error.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    setAuthLoading(true);
+    setAuthMessage('');
+    try {
+      await signOut(auth);
+      // onAuthStateChanged will handle setting the user to null and updating message
+      // setAuthMessage('Signed out successfully.'); // No longer needed here
+    } catch (error: any) {
+      setAuthMessage(error.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+  
+  if (!isMounted) {
+    // To prevent hydration mismatch for auth state, render nothing or a generic loader
+    return (
+      <div className="container mx-auto px-4 py-8 min-h-screen flex flex-col items-center justify-center bg-background text-foreground">
+        <Skeleton className="h-12 w-1/2 mb-4" />
+        <Skeleton className="h-64 w-full max-w-md" />
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto px-4 py-8 min-h-screen flex flex-col items-center bg-background text-foreground">
@@ -53,10 +146,69 @@ export default function BotolaRosterPage() {
           Discover the stars of Moroccan football.
         </p>
       </header>
+
+      {/* Authentication Section */}
+      <Card className="w-full max-w-md mb-10 shadow-xl border-none bg-card">
+        <CardHeader>
+          <CardTitle className="text-2xl text-center text-primary-foreground bg-primary py-4 rounded-t-lg -mx-6 -mt-6 px-6">
+            {user ? 'Welcome!' : 'Account'}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6 p-6">
+          {user ? (
+            <div className="space-y-4 text-center">
+              <p className="text-lg text-foreground">Welcome, {user.email}!</p>
+              <Button onClick={handleSignOut} disabled={authLoading} className="w-full">
+                {authLoading ? 'Signing Out...' : 'Sign Out'}
+              </Button>
+            </div>
+          ) : (
+            <form onSubmit={email.includes('@') ? handleLogin : handleSignUp} className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input 
+                  id="email"
+                  type="email" 
+                  placeholder="your@email.com" 
+                  value={email} 
+                  onChange={(e) => setEmail(e.target.value)} 
+                  required 
+                  className="bg-input"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input 
+                  id="password"
+                  type="password" 
+                  placeholder="••••••••" 
+                  value={password} 
+                  onChange={(e) => setPassword(e.target.value)} 
+                  required 
+                  className="bg-input"
+                />
+              </div>
+              <div className="flex space-x-4">
+                <Button type="submit" onClick={handleSignUp} disabled={authLoading} className="flex-1">
+                  {authLoading ? 'Processing...' : 'Sign Up'}
+                </Button>
+                <Button type="submit" onClick={handleLogin} disabled={authLoading} variant="outline" className="flex-1">
+                  {authLoading ? 'Processing...' : 'Log In'}
+                </Button>
+              </div>
+            </form>
+          )}
+          {authMessage && (
+            <p className={`text-sm text-center p-3 rounded-md ${authMessage.toLowerCase().includes('error') || authMessage.toLowerCase().includes('invalid') || authMessage.toLowerCase().includes('failed') ? 'bg-destructive/20 text-destructive' : 'bg-accent/20 text-accent-foreground'}`}>
+              {authMessage}
+            </p>
+          )}
+        </CardContent>
+      </Card>
       
       <div 
         id="playersList"
-        style={{ textAlign: 'left', width: '100%', maxWidth: '700px', marginTop: '20px' }}
+        style={{ textAlign: 'left', width: '100%', maxWidth: '700px' }}
         className={`
           transition-opacity duration-1000 ease-in-out 
           ${loading ? 'opacity-0' : 'opacity-100'}
@@ -136,3 +288,6 @@ export default function BotolaRosterPage() {
     </div>
   );
 }
+
+
+    
