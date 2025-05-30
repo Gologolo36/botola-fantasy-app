@@ -33,7 +33,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Award, Star, ShieldCheck, Banknote, Scale, Trash2, TrendingUp, CalendarDays, Users, PlusCircle, LogIn } from 'lucide-react'; 
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Award, Star, ShieldCheck, Banknote, Scale, Trash2, TrendingUp, CalendarDays, Users, PlusCircle, LogIn, Filter } from 'lucide-react'; 
 
 interface Player {
   id: string;
@@ -56,7 +57,7 @@ interface UserTeamData {
   freeTransfers: number;
   transfersMadeThisGw: number;
   pointsDeductions: number;
-  userEmail?: string; // For easier lookup in leaderboards
+  userEmail?: string; 
 }
 
 interface League {
@@ -64,13 +65,13 @@ interface League {
   name: string;
   code: string;
   creatorId: string;
-  members: string[]; // array of UIDs
+  members: string[]; 
   createdAt: Timestamp;
 }
 
 interface LeaderboardEntry {
   memberId: string;
-  memberEmail: string; // Or display name
+  memberEmail: string; 
   points: number;
   rank: number;
 }
@@ -117,6 +118,20 @@ export default function BotolaRosterPage() {
   const [leagueMessage, setLeagueMessage] = useState('');
   const [leagueLeaderboards, setLeagueLeaderboards] = useState<Record<string, LeaderboardEntry[]>>({});
 
+  // Player Roster Filters & Sort State
+  const [selectedTeamFilter, setSelectedTeamFilter] = useState<string>('All Teams');
+  const [availableTeams, setAvailableTeams] = useState<string[]>(['All Teams']);
+  const [selectedPositionFilter, setSelectedPositionFilter] = useState<string>('All');
+  const availablePositions = useMemo(() => ['All', 'Goalkeeper', 'Defender', 'Midfielder', 'Forward'], []);
+  const [selectedSortOption, setSelectedSortOption] = useState<string>('Points (High to Low)');
+  const sortOptions = useMemo(() => [
+    'Points (High to Low)',
+    'Points (Low to High)',
+    'Price (High to Low)',
+    'Price (Low to High)',
+    'Alphabetical (A-Z)',
+  ], []);
+
 
   const auth = getAuth(db.app);
 
@@ -125,7 +140,6 @@ export default function BotolaRosterPage() {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       if (!currentUser) {
-        // Reset all user-specific state
         setEmail('');
         setPassword('');
         setMyTeamPlayerIds([]); 
@@ -143,7 +157,6 @@ export default function BotolaRosterPage() {
         setAuthMessage('Please sign in or sign up.');
       } else {
         setAuthMessage(`Logged in as ${currentUser.email}`);
-        // User is logged in, load their team and leagues
       }
     });
     return () => unsubscribe();
@@ -196,7 +209,6 @@ export default function BotolaRosterPage() {
 
         if (existingData.currentGameweek !== CURRENT_GAMEWEEK || existingData.freeTransfers === undefined) {
           teamDataToSave.currentGameweek = CURRENT_GAMEWEEK;
-          // For GW1, give more transfers if it's the first time or a reset. Subsequent GWs might get 1 or 2.
           teamDataToSave.freeTransfers = INITIAL_FREE_TRANSFERS_GW1; 
           teamDataToSave.transfersMadeThisGw = 0;
           teamDataToSave.pointsDeductions = 0; 
@@ -206,12 +218,12 @@ export default function BotolaRosterPage() {
             teamDataToSave.budget = INITIAL_BUDGET;
             needsFirestoreUpdate = true;
         }
-        if (existingData.userEmail !== user.email) { // Keep email updated
+        if (existingData.userEmail !== user.email) { 
             teamDataToSave.userEmail = user.email || undefined;
             needsFirestoreUpdate = true;
         }
       } else {
-        needsFirestoreUpdate = true; // New user, document doesn't exist
+        needsFirestoreUpdate = true; 
       }
       
       setMyTeamPlayerIds(teamDataToSave.playerIds || []);
@@ -246,6 +258,8 @@ export default function BotolaRosterPage() {
           ...doc.data() as Omit<Player, 'id'> 
         }));
         setPlayers(playersData);
+        const uniqueTeams = Array.from(new Set(playersData.map(p => p.team).filter(t => t)));
+        setAvailableTeams(['All Teams', ...uniqueTeams.sort()]);
       } catch (error) {
         console.error("Error fetching players: ", error);
         setAuthMessage("Error fetching players.");
@@ -260,7 +274,6 @@ export default function BotolaRosterPage() {
     if (user && isMounted) {
       loadUserTeam();
     } else if (!user && isMounted) {
-      // Reset team state if user logs out
       setMyTeamPlayerIds([]);
       setMyTeamPlayers([]);
       setCaptainId(null);
@@ -292,6 +305,39 @@ export default function BotolaRosterPage() {
     return calculateTeamPointsForMember(myTeamPlayerIds, captainId, pointsDeductions, players);
   }, [myTeamPlayerIds, captainId, pointsDeductions, players, calculateTeamPointsForMember]);
 
+  const filteredAndSortedPlayers = useMemo(() => {
+    let processedPlayers = [...players];
+
+    if (selectedTeamFilter !== 'All Teams') {
+      processedPlayers = processedPlayers.filter(p => p.team === selectedTeamFilter);
+    }
+
+    if (selectedPositionFilter !== 'All') {
+      processedPlayers = processedPlayers.filter(p => p.position === selectedPositionFilter);
+    }
+
+    switch (selectedSortOption) {
+      case 'Points (High to Low)':
+        processedPlayers.sort((a, b) => (b.points || 0) - (a.points || 0));
+        break;
+      case 'Points (Low to High)':
+        processedPlayers.sort((a, b) => (a.points || 0) - (b.points || 0));
+        break;
+      case 'Price (High to Low)':
+        processedPlayers.sort((a, b) => (b.price || 0) - (a.price || 0));
+        break;
+      case 'Price (Low to High)':
+        processedPlayers.sort((a, b) => (a.price || 0) - (b.price || 0));
+        break;
+      case 'Alphabetical (A-Z)':
+        processedPlayers.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      default:
+        break;
+    }
+    return processedPlayers;
+  }, [players, selectedTeamFilter, selectedPositionFilter, selectedSortOption]);
+
 
   const handleSignUp = async (e: FormEvent) => {
     e.preventDefault();
@@ -300,14 +346,11 @@ export default function BotolaRosterPage() {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const newUser = userCredential.user;
-      // Create a user document in 'users' collection
       await setDoc(doc(db, "users", newUser.uid), {
         email: newUser.email,
         uid: newUser.uid,
         createdAt: Timestamp.now(),
       });
-      // Initialize team document as well - loadUserTeam will be called by auth state change
-      // No need to explicitly call loadUserTeam() here as onAuthStateChanged will trigger it.
     } catch (error: any) {
       setAuthMessage(error.message);
     } finally {
@@ -321,7 +364,6 @@ export default function BotolaRosterPage() {
     setAuthMessage('');
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      // loadUserTeam will be called by onAuthStateChanged
     } catch (error: any) {
       setAuthMessage(error.message);
     } finally {
@@ -334,7 +376,6 @@ export default function BotolaRosterPage() {
     setAuthMessage('');
     try {
       await signOut(auth);
-      // State reset is handled by onAuthStateChanged
     } catch (error: any)
     {
       setAuthMessage(error.message);
@@ -387,8 +428,8 @@ export default function BotolaRosterPage() {
         freeTransfers: currentFreeTransfers,
         transfersMadeThisGw: currentTransfersMade,
         pointsDeductions: currentPointsDeductions,
-        currentGameweek: currentGameweek, // Ensure currentGameweek is saved
-        userEmail: user.email // ensure email is saved
+        currentGameweek: currentGameweek, 
+        userEmail: user.email 
       }, { merge: true });
       
       setMyTeamPlayerIds(newTeamPlayerIds); 
@@ -443,7 +484,7 @@ export default function BotolaRosterPage() {
         freeTransfers: currentFreeTransfers,
         transfersMadeThisGw: currentTransfersMade,
         pointsDeductions: currentPointsDeductions,
-        currentGameweek: currentGameweek // Ensure currentGameweek is saved
+        currentGameweek: currentGameweek 
       }, { merge: true });
 
       setMyTeamPlayerIds(newTeamPlayerIds);
@@ -515,7 +556,6 @@ export default function BotolaRosterPage() {
     }
   };
 
-  // --- League Functions ---
   const generateLeagueCode = (length = 6): string => {
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     let result = '';
@@ -540,7 +580,6 @@ export default function BotolaRosterPage() {
 
     try {
       let newCode = generateLeagueCode();
-      // Simple check for code uniqueness, in a real app might need more robust check or retry
       const q = query(collection(db, "leagues"), where("code", "==", newCode));
       let existingLeagueSnap = await getDocs(q);
       while(!existingLeagueSnap.empty){
@@ -557,7 +596,7 @@ export default function BotolaRosterPage() {
       };
       const leagueDocRef = await addDoc(collection(db, "leagues"), leagueData);
       setLeagueMessage(`League "${leagueData.name}" created! Code: ${leagueData.code}`);
-      setLeagueNameInput(''); // Clear input
+      setLeagueNameInput(''); 
     } catch (error) {
       console.error("Error creating league:", error);
       setLeagueMessage("Failed to create league. Please try again.");
@@ -601,7 +640,7 @@ export default function BotolaRosterPage() {
         members: arrayUnion(user.uid)
       });
       setLeagueMessage(`Successfully joined league "${leagueData.name}"!`);
-      setLeagueCodeInput(''); // Clear input
+      setLeagueCodeInput(''); 
     } catch (error) {
       console.error("Error joining league:", error);
       setLeagueMessage("Failed to join league. Please try again.");
@@ -645,7 +684,6 @@ export default function BotolaRosterPage() {
             memberEntries.push({ memberId, memberEmail: 'Error Loading', points: 0, rank: 0 });
           }
         }
-        // Sort by points and assign rank
         memberEntries.sort((a, b) => b.points - a.points);
         memberEntries.forEach((entry, index) => entry.rank = index + 1);
         leaderboards[league.id] = memberEntries;
@@ -908,15 +946,64 @@ export default function BotolaRosterPage() {
         </>
       )}
       
+      <Card className="w-full max-w-2xl mb-10 shadow-xl border-none bg-card">
+        <CardHeader className="bg-secondary text-secondary-foreground py-4 rounded-t-lg -mx-6 -mt-6 px-6">
+            <CardTitle className="text-xl sm:text-2xl text-center flex items-center justify-center gap-2">
+            <Filter className="h-6 w-6" /> Player Filters & Sorting
+            </CardTitle>
+        </CardHeader>
+        <CardContent className="p-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+            <Label htmlFor="teamFilter">Filter by Team</Label>
+            <Select value={selectedTeamFilter} onValueChange={setSelectedTeamFilter} disabled={loading}>
+                <SelectTrigger id="teamFilter" className="bg-input">
+                <SelectValue placeholder="Select team" />
+                </SelectTrigger>
+                <SelectContent>
+                {availableTeams.map(team => (
+                    <SelectItem key={team} value={team}>{team}</SelectItem>
+                ))}
+                </SelectContent>
+            </Select>
+            </div>
+            <div>
+            <Label htmlFor="positionFilter">Filter by Position</Label>
+            <Select value={selectedPositionFilter} onValueChange={setSelectedPositionFilter} disabled={loading}>
+                <SelectTrigger id="positionFilter" className="bg-input">
+                <SelectValue placeholder="Select position" />
+                </SelectTrigger>
+                <SelectContent>
+                {availablePositions.map(pos => (
+                    <SelectItem key={pos} value={pos}>{pos}</SelectItem>
+                ))}
+                </SelectContent>
+            </Select>
+            </div>
+            <div>
+            <Label htmlFor="sortOption">Sort By</Label>
+            <Select value={selectedSortOption} onValueChange={setSelectedSortOption} disabled={loading}>
+                <SelectTrigger id="sortOption" className="bg-input">
+                <SelectValue placeholder="Select sort option" />
+                </SelectTrigger>
+                <SelectContent>
+                {sortOptions.map(opt => (
+                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                ))}
+                </SelectContent>
+            </Select>
+            </div>
+        </CardContent>
+      </Card>
+
       <div 
         id="playersList"
         style={{ textAlign: 'left', width: '100%', maxWidth: '700px' }}
         className={`
           transition-opacity duration-1000 ease-in-out 
-          ${loading ? 'opacity-0' : 'opacity-100'}
+          ${loading && players.length === 0 ? 'opacity-0' : 'opacity-100'}
         `}
       >
-        {loading ? (
+        {loading && players.length === 0 ? (
           <Card className="shadow-xl border-none">
             <CardHeader>
               <Skeleton className="h-8 w-3/5 mx-auto bg-muted/50" />
@@ -939,13 +1026,13 @@ export default function BotolaRosterPage() {
           <Card className="shadow-xl border-none bg-card overflow-hidden">
             <CardHeader className="bg-primary p-0">
               <CardTitle className="text-2xl text-center text-primary-foreground py-6 rounded-t-lg -mx-6 -mt-6 px-6">
-                Player Roster
+                Player Roster ({filteredAndSortedPlayers.length} players)
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              {players.length > 0 ? (
+              {filteredAndSortedPlayers.length > 0 ? (
                 <ul className="divide-y divide-border">
-                  {players.map((player) => {
+                  {filteredAndSortedPlayers.map((player) => {
                     const isPlayerInTeam = myTeamPlayerIds.includes(player.id);
                     const isTeamFull = myTeamPlayerIds.length >= MAX_TEAM_SIZE;
                     const playerPrice = player.price || 0;
@@ -1001,7 +1088,7 @@ export default function BotolaRosterPage() {
                   })}
                 </ul>
               ) : (
-                <p className="text-lg text-muted-foreground text-center p-10">No players found.</p>
+                <p className="text-lg text-muted-foreground text-center p-10">No players match your current filters.</p>
               )}
             </CardContent>
           </Card>
@@ -1014,7 +1101,3 @@ export default function BotolaRosterPage() {
   );
 }
 
-
-    
-
-    
