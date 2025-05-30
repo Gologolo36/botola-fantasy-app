@@ -13,8 +13,10 @@ interface Player {
   team: string;
   position?: string;
   jerseyNumber?: number;
-  imageUrl?: string; // Optional: for player images
-  dataAiHint?: string; // Optional: for AI image search hint
+  imageUrl?: string; 
+  dataAiHint?: string;
+  price?: number; // Added price
+  points?: number; // Added points
 }
 
 export default function BotolaRosterPage() {
@@ -24,26 +26,23 @@ export default function BotolaRosterPage() {
   useEffect(() => {
     const fetchPlayers = async () => {
       try {
-        const playersCollectionRef = collection(db, 'players'); // Get a reference to the collection
-        const playersSnapshot = await getDocs(playersCollectionRef); // Get the documents in the collection
+        const playersCollectionRef = collection(db, 'players'); 
+        const playersSnapshot = await getDocs(playersCollectionRef); 
         const playersData = playersSnapshot.docs.map(doc => ({
           id: doc.id,
-          ...doc.data() as Omit<Player, 'id'> // Cast data to Player interface, excluding the id
+          ...doc.data() as Omit<Player, 'id'> 
         }));
         setPlayers(playersData);
       } catch (error) {
         console.error("Error fetching players: ", error);
-        // Optionally set an error state here if you want to display an error message to the user
       } finally {
         setLoading(false);
       }
     };
 
     fetchPlayers();
-  }, []); // Empty dependency array means this effect runs once on mount
+  }, []); 
 
-  // From here downwards is the JSX (HTML-like structure) that your component renders.
-  // There should be no JavaScript code or stray characters directly before this 'return'.
   return (
     <div className="container mx-auto px-4 py-8 min-h-screen flex flex-col items-center bg-background text-foreground">
       <header className="mb-10 text-center">
@@ -117,7 +116,9 @@ export default function BotolaRosterPage() {
                         <p className="text-xl font-semibold text-foreground">{player.name}</p>
                         <p className="text-md text-primary font-medium">{player.team}</p>
                         {player.position && <p className="text-sm text-muted-foreground">Position: {player.position}</p>}
-                        {player.jerseyNumber && <p className="text-sm text-muted-foreground">Jersey: #{player.jerseyNumber}</p>}
+                        {player.jerseyNumber !== undefined && <p className="text-sm text-muted-foreground">Jersey: #{player.jerseyNumber}</p>}
+                        {player.price !== undefined && <p className="text-sm text-muted-foreground">Price: £{player.price.toFixed(1)}m</p>}
+                        {player.points !== undefined && <p className="text-sm text-muted-foreground">Points: {player.points}</p>}
                       </div>
                     </li>
                   ))}
