@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import { Award, Star, ShieldCheck } from 'lucide-react'; // For Captain/Vice-Captain icons, ShieldCheck for points
+import { Award, Star, ShieldCheck, Banknote, Scale, Trash2 } from 'lucide-react'; // For Captain/Vice-Captain icons, ShieldCheck for points, Banknote for budget, Scale for team value, Trash2 for sell
 
 interface Player {
   id: string;
@@ -33,6 +33,7 @@ interface Player {
 }
 
 const MAX_TEAM_SIZE = 15;
+const INITIAL_BUDGET = 100.0;
 
 export default function BotolaRosterPage() {
   const [players, setPlayers] = useState<Player[]>([]);
@@ -52,6 +53,7 @@ export default function BotolaRosterPage() {
   const [myTeamLoading, setMyTeamLoading] = useState(false);
   const [captainId, setCaptainId] = useState<string | null>(null);
   const [viceCaptainId, setViceCaptainId] = useState<string | null>(null);
+  const [budget, setBudget] = useState<number>(INITIAL_BUDGET);
 
   const auth = getAuth(db.app);
 
@@ -66,11 +68,55 @@ export default function BotolaRosterPage() {
         setMyTeamPlayers([]);
         setCaptainId(null);
         setViceCaptainId(null);
+        setBudget(INITIAL_BUDGET); // Reset budget on logout
+        setAuthMessage('Please sign in or sign up.');
+      } else {
+        setAuthMessage(`Logged in as ${currentUser.email}`);
       }
-      setAuthMessage(currentUser ? `Logged in as ${currentUser.email}` : 'Please sign in or sign up.');
+      // setAuthLoading(false); // Removed as it might prematurely hide loading states during auth changes
     });
     return () => unsubscribe();
   }, [auth]);
+
+  const loadUserTeam = useMemo(() => async () => {
+    if (!user || !isMounted) return; // Guard against running if user or mount status is not ready
+
+    setMyTeamLoading(true);
+    setAuthMessage(''); 
+    const teamDocRef = doc(db, 'userTeams', user.uid);
+    try {
+      const teamDocSnap = await getDoc(teamDocRef);
+      if (teamDocSnap.exists()) {
+        const teamData = teamDocSnap.data();
+        setMyTeamPlayerIds(teamData.playerIds || []);
+        setCaptainId(teamData.captainId || null);
+        setViceCaptainId(teamData.viceCaptainId || null);
+        if (teamData.budget === undefined) {
+          setBudget(INITIAL_BUDGET);
+          await setDoc(teamDocRef, { budget: INITIAL_BUDGET }, { merge: true });
+        } else {
+          setBudget(teamData.budget);
+        }
+      } else {
+        // New user or no team doc yet, initialize it
+        setMyTeamPlayerIds([]);
+        setCaptainId(null);
+        setViceCaptainId(null);
+        setBudget(INITIAL_BUDGET);
+        await setDoc(teamDocRef, { 
+          playerIds: [], 
+          captainId: null, 
+          viceCaptainId: null, 
+          budget: INITIAL_BUDGET 
+        });
+      }
+    } catch (error) {
+      console.error("Error loading/initializing user team:", error);
+      setAuthMessage("Error loading/initializing your team.");
+    } finally {
+      setMyTeamLoading(false);
+    }
+  }, [user, isMounted]); // Dependencies for useMemo wrapper
 
   useEffect(() => {
     const fetchPlayers = async () => {
@@ -94,36 +140,19 @@ export default function BotolaRosterPage() {
   }, []); 
 
   useEffect(() => {
-    if (!user || !isMounted) {
+    if (user && isMounted) {
+      loadUserTeam();
+    } else if (!user && isMounted) {
+      // Reset team state if user logs out and component is still mounted
+      setMyTeamPlayerIds([]);
+      setMyTeamPlayers([]);
+      setCaptainId(null);
+      setViceCaptainId(null);
+      setBudget(INITIAL_BUDGET);
       setMyTeamLoading(false);
-      return;
     }
+  }, [user, isMounted, loadUserTeam]);
 
-    const loadUserTeam = async () => {
-      setMyTeamLoading(true);
-      setAuthMessage(''); 
-      try {
-        const teamDocRef = doc(db, 'userTeams', user.uid);
-        const teamDocSnap = await getDoc(teamDocRef);
-        if (teamDocSnap.exists()) {
-          const teamData = teamDocSnap.data();
-          setMyTeamPlayerIds(teamData.playerIds || []);
-          setCaptainId(teamData.captainId || null);
-          setViceCaptainId(teamData.viceCaptainId || null);
-        } else {
-          setMyTeamPlayerIds([]); 
-          setCaptainId(null);
-          setViceCaptainId(null);
-        }
-      } catch (error) {
-        console.error("Error loading user team:", error);
-        setAuthMessage("Error loading your team.");
-      } finally {
-        setMyTeamLoading(false);
-      }
-    };
-    loadUserTeam();
-  }, [user, isMounted]);
 
   useEffect(() => {
     if (players.length > 0 && myTeamPlayerIds.length > 0) {
@@ -133,6 +162,10 @@ export default function BotolaRosterPage() {
       setMyTeamPlayers([]); 
     }
   }, [players, myTeamPlayerIds]);
+
+  const teamValue = useMemo(() => {
+    return myTeamPlayers.reduce((total, player) => total + (player.price || 0), 0);
+  }, [myTeamPlayers]);
 
   const totalTeamPoints = useMemo(() => {
     if (!myTeamPlayers || myTeamPlayers.length === 0) {
@@ -154,6 +187,7 @@ export default function BotolaRosterPage() {
     setAuthMessage('');
     try {
       await createUserWithEmailAndPassword(auth, email, password);
+      // loadUserTeam will be called via useEffect hook due to user state change
     } catch (error: any) {
       setAuthMessage(error.message);
     } finally {
@@ -167,6 +201,7 @@ export default function BotolaRosterPage() {
     setAuthMessage('');
     try {
       await signInWithEmailAndPassword(auth, email, password);
+      // loadUserTeam will be called via useEffect hook due to user state change
     } catch (error: any) {
       setAuthMessage(error.message);
     } finally {
@@ -179,6 +214,7 @@ export default function BotolaRosterPage() {
     setAuthMessage('');
     try {
       await signOut(auth);
+      // State reset handled by onAuthStateChanged
     } catch (error: any)
     {
       setAuthMessage(error.message);
@@ -200,14 +236,33 @@ export default function BotolaRosterPage() {
       setAuthMessage(`${playerToAdd.name} is already in your team.`);
       return;
     }
+    const playerPrice = playerToAdd.price || 0;
+    if (playerPrice > budget) {
+      setAuthMessage(`Not enough budget to add ${playerToAdd.name}. Needs £${playerPrice.toFixed(1)}m, you have £${budget.toFixed(1)}m.`);
+      return;
+    }
 
     setAuthLoading(true); 
     const newTeamPlayerIds = [...myTeamPlayerIds, playerToAdd.id];
+    const newBudget = budget - playerPrice;
     try {
       const teamDocRef = doc(db, 'userTeams', user.uid);
-      await setDoc(teamDocRef, { playerIds: newTeamPlayerIds }, { merge: true });
+      // Ensure document exists with all necessary fields, especially if it's the first add
+      const teamDocSnap = await getDoc(teamDocRef);
+      if (!teamDocSnap.exists()) {
+        // This case should ideally be covered by loadUserTeam, but as a fallback:
+        await setDoc(teamDocRef, { 
+            playerIds: newTeamPlayerIds, 
+            budget: newBudget, 
+            captainId: null, 
+            viceCaptainId: null 
+        });
+      } else {
+        await setDoc(teamDocRef, { playerIds: newTeamPlayerIds, budget: newBudget }, { merge: true });
+      }
       setMyTeamPlayerIds(newTeamPlayerIds); 
-      setAuthMessage(`${playerToAdd.name} added to your team!`);
+      setBudget(newBudget);
+      setAuthMessage(`${playerToAdd.name} added! Budget: £${newBudget.toFixed(1)}m.`);
     } catch (error) {
       console.error("Error adding player to team:", error);
       setAuthMessage("Failed to add player. Please try again.");
@@ -215,6 +270,48 @@ export default function BotolaRosterPage() {
       setAuthLoading(false);
     }
   };
+
+  const handleSellPlayer = async (playerToSell: Player) => {
+    if (!user) {
+      setAuthMessage("You must be logged in to sell players.");
+      return;
+    }
+    setAuthLoading(true);
+    setAuthMessage('');
+    const newTeamPlayerIds = myTeamPlayerIds.filter(id => id !== playerToSell.id);
+    const newBudget = budget + (playerToSell.price || 0);
+    let newCaptainId = captainId;
+    let newViceCaptainId = viceCaptainId;
+
+    if (captainId === playerToSell.id) {
+      newCaptainId = null;
+    }
+    if (viceCaptainId === playerToSell.id) {
+      newViceCaptainId = null;
+    }
+    
+    try {
+      const teamDocRef = doc(db, 'userTeams', user.uid);
+      await setDoc(teamDocRef, { 
+        playerIds: newTeamPlayerIds, 
+        budget: newBudget,
+        captainId: newCaptainId,
+        viceCaptainId: newViceCaptainId,
+      }, { merge: true });
+
+      setMyTeamPlayerIds(newTeamPlayerIds);
+      setBudget(newBudget);
+      setCaptainId(newCaptainId);
+      setViceCaptainId(newViceCaptainId);
+      setAuthMessage(`${playerToSell.name} sold. Budget: £${newBudget.toFixed(1)}m.`);
+    } catch (error) {
+      console.error("Error selling player:", error);
+      setAuthMessage("Failed to sell player. Please try again.");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
 
   const handleSetCaptain = async (selectedPlayerId: string) => {
     if (!user) {
@@ -333,7 +430,7 @@ export default function BotolaRosterPage() {
             </form>
           )}
           {authMessage && (
-            <p className={`text-sm text-center p-3 rounded-md ${authMessage.toLowerCase().includes('error') || authMessage.toLowerCase().includes('invalid') || authMessage.toLowerCase().includes('failed') || authMessage.toLowerCase().includes('must be logged in') || authMessage.toLowerCase().includes('team is full') ? 'bg-destructive/20 text-destructive' : 'bg-accent/20 text-accent-foreground'}`}>
+            <p className={`text-sm text-center p-3 rounded-md ${authMessage.toLowerCase().includes('error') || authMessage.toLowerCase().includes('invalid') || authMessage.toLowerCase().includes('failed') || authMessage.toLowerCase().includes('must be logged in') || authMessage.toLowerCase().includes('team is full') || authMessage.toLowerCase().includes('not enough budget') ? 'bg-destructive/20 text-destructive' : 'bg-accent/20 text-accent-foreground'}`}>
               {authMessage}
             </p>
           )}
@@ -343,12 +440,19 @@ export default function BotolaRosterPage() {
       {user && (
         <Card className="w-full max-w-2xl mb-10 shadow-xl border-none bg-card">
           <CardHeader className="bg-secondary text-secondary-foreground py-4">
-            <CardTitle className="text-2xl text-center flex flex-col sm:flex-row justify-around items-center">
-              <span>My Team ({myTeamPlayers.length}/{MAX_TEAM_SIZE})</span>
-              <span className="text-lg font-semibold flex items-center mt-2 sm:mt-0">
-                <ShieldCheck className="h-5 w-5 mr-2 text-primary" />
-                Total Points: {totalTeamPoints}
-              </span>
+            <CardTitle className="text-xl sm:text-2xl text-center flex flex-col sm:flex-row justify-between items-center gap-2 sm:gap-4 px-2">
+              <span className="whitespace-nowrap">My Team ({myTeamPlayers.length}/{MAX_TEAM_SIZE})</span>
+              <div className="flex flex-wrap justify-center items-center gap-x-3 gap-y-1 text-sm sm:text-base font-semibold mt-2 sm:mt-0">
+                <span className="flex items-center whitespace-nowrap">
+                  <Banknote className="h-4 w-4 sm:h-5 sm:w-5 mr-1 text-green-400" /> Budget: £{budget.toFixed(1)}m
+                </span>
+                <span className="flex items-center whitespace-nowrap">
+                  <Scale className="h-4 w-4 sm:h-5 sm:w-5 mr-1 text-blue-400" /> Value: £{teamValue.toFixed(1)}m
+                </span>
+                <span className="flex items-center whitespace-nowrap">
+                  <ShieldCheck className="h-4 w-4 sm:h-5 sm:w-5 mr-1 text-primary" /> Points: {totalTeamPoints}
+                </span>
+              </div>
             </CardTitle>
           </CardHeader>
           <CardContent className="p-6">
@@ -373,18 +477,18 @@ export default function BotolaRosterPage() {
                           {isCaptain && <span className="ml-2 text-xs font-bold text-primary">(C)</span>}
                           {isViceCaptain && <span className="ml-2 text-xs font-bold text-secondary-foreground">(V)</span>}
                         </p>
-                        <p className="text-sm text-muted-foreground">{player.team}</p>
+                        <p className="text-sm text-muted-foreground">{player.team} {player.price !== undefined ? `(£${player.price.toFixed(1)}m)` : ''}</p>
                       </div>
-                      <div className="flex space-x-2 items-center">
+                      <div className="flex space-x-1 sm:space-x-2 items-center">
                         <Button 
                           size="sm" 
                           variant={isCaptain ? "default" : "outline"} 
                           onClick={() => handleSetCaptain(player.id)}
                           disabled={authLoading || (isCaptain && player.id === captainId) } 
                           aria-label={`Set ${player.name} as Captain`}
-                          className="p-2"
+                          className="p-1.5 sm:p-2"
                         >
-                          <Award className="h-4 w-4" />
+                          <Award className="h-3 w-3 sm:h-4 sm:w-4" />
                         </Button>
                         <Button 
                           size="sm" 
@@ -392,9 +496,19 @@ export default function BotolaRosterPage() {
                           onClick={() => handleSetViceCaptain(player.id)}
                           disabled={authLoading || (isViceCaptain && player.id === viceCaptainId)} 
                           aria-label={`Set ${player.name} as Vice-Captain`}
-                          className="p-2"
+                          className="p-1.5 sm:p-2"
                         >
-                          <Star className="h-4 w-4" />
+                          <Star className="h-3 w-3 sm:h-4 sm:w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => handleSellPlayer(player)}
+                          disabled={authLoading}
+                          aria-label={`Sell ${player.name}`}
+                          className="p-1.5 sm:p-2"
+                        >
+                          <Trash2 className="h-3 w-3 sm:h-4 sm:w-4" />
                         </Button>
                       </div>
                     </li>
@@ -446,6 +560,14 @@ export default function BotolaRosterPage() {
                   {players.map((player) => {
                     const isPlayerInTeam = myTeamPlayerIds.includes(player.id);
                     const isTeamFull = myTeamPlayerIds.length >= MAX_TEAM_SIZE;
+                    const playerPrice = player.price || 0;
+                    const canAfford = playerPrice <= budget;
+                    
+                    let buttonText = "Add to Team";
+                    if (isPlayerInTeam) buttonText = "Added";
+                    else if (isTeamFull) buttonText = "Team Full";
+                    else if (!canAfford) buttonText = "Too Expensive";
+
                     return (
                       <li 
                         key={player.id} 
@@ -478,12 +600,12 @@ export default function BotolaRosterPage() {
                         {user && (
                           <Button
                             onClick={() => handleAddPlayerToTeam(player)}
-                            disabled={authLoading || isPlayerInTeam || (isTeamFull && !isPlayerInTeam)}
+                            disabled={authLoading || isPlayerInTeam || (isTeamFull && !isPlayerInTeam) || (!canAfford && !isPlayerInTeam)}
                             variant={isPlayerInTeam ? "outline" : "default"}
                             size="sm"
                             className="mt-2 self-center"
                           >
-                            {isPlayerInTeam ? "Added" : (isTeamFull ? "Team Full" : "Add to Team")}
+                            {buttonText}
                           </Button>
                         )}
                       </li>
